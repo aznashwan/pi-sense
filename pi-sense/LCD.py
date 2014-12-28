@@ -5,17 +5,20 @@ import time
 import RPi.GPIO as gpio
 
 class LCD(object):
-    """ An object-wrapper that models our LCD (Adafruit PI-Shield 16x2 LCD).
+    """
+        An object-wrapper that models our LCD (Adafruit PI-Shield 16x2 LCD).
 
         Allows for creation of the LCD object and direct use of its
-        write(str message, int line) method.
+        writeline(str message) method.
 
         All apparent "magic constants" present in the code below have a direct
         explanation in the datasheet of our particular model of LCD that may be
         found here:
             https://learn.adafruit.com/downloads/pdf/drive-a-16x2-lcd-directly-with-a-raspberry-pi.pdf
     """
+
     # define all of out used pins
+    # these values are static due to the build and operation mode of the LCD
     __datapin1 = 17
     __datapin2 = 18
     __datapin3 = 22
@@ -30,7 +33,6 @@ class LCD(object):
 
     # screen model parameters
     __screenwidth = 16
-    __delay = 0.00005
 
 
     def __init__(self, mode=gpio.BCM):
@@ -38,7 +40,6 @@ class LCD(object):
         if mode == gpio.BOARD:
             self.__switchtoboard()
         gpio.setmode(mode)
-        gpio.setwarnings(False)
 
         # setup all the pins for output
         gpio.setup(self.__regsel, gpio.OUT)
@@ -49,75 +50,110 @@ class LCD(object):
         self.__initialize()
 
 
-    def __initialize(self):
-        """ Initialize the LCD for operation
-            @param: None
-            @return: None
-        """
-        # send initialization instructions
-        self.__writebyte(0x33, False)
-        self.__writebyte(0x32, False)
-
-        # send line configurations
-        self.__writebyte(0x28, False)
-
-        # send cursor off command
-        # set to 0x0E to enable
-        self.__writebyte(0x0C, False)
-
-        # shift cursor to beginning
-        self.__writebyte(0x06, False)
-
-        # set operation mode to 8-bit
-        self.__writebyte(0x01, False)
-
-
     def __switchtoboard(self):
-        """ Switches the pin numbering scheme to gpio.BOARD.
+        """
+            Switches the pin numbering scheme to gpio.BOARD.
             WARNING: for stability reasons, a single scheme should be picked
                 from the start and used consistently throughout the project.
+
             @param: None
+
             @return: None
         """
         self.__datapin1 = 11
         self.__datapin2 = 12
         self.__datapin3 = 15
         self.__datapin4 = 16
+        self.__datapins = [self.__datapin1, self.__datapin2, self.__datapin3,
+                        self.__datapin4]
+
         self.__enable = 18
         self.__regsel = 22
 
 
-    def __enableread(self):
-        """ Enables reading to the internal register from the four data pins.
+    def __regmode(self, mode="data"):
+        """
+            Switch the GPIO which signals wether the next incoming byte is a
+            data byte (1 logic) or an instruction byte (0 logic).
+
+            @param: mode - str with the operation mode to be used
+                data  :: data byte
+                instr :: instruction byte
+
+            @return: None
+        """
+        assert mode in ["data", "instr"]
+
+        if mode == "data":
+            gpio.output(self.__regsel, True)
+        else:
+            gpio.output(self.__regsel, False)
+
+
+    def __initialize(self):
+        """
+            Issue initialization commands to the LCD.
+            8-bit mode was preffered due to its offering the full range of
+            ASCII characters.
+
             @param: None
+
             @return: None
         """
-        # initial delay
-        time.sleep(self.__delay)
-        # set read enable to True
+        self.__regmode("instr")
+
+        # send initialization instructions
+        self.__writebyte(0x33)
+        self.__writebyte(0x32)
+
+        # send line configurations
+        self.__writebyte(0x28)
+
+        # send cursor off command
+        # set to 0x0E to enable
+        self.__writebyte(0x0C)
+
+        # shift cursor to beginning
+        self.__writebyte(0x06)
+
+        # set operation mode to 8-bit
+        self.__writebyte(0x01)
+
+
+    def __enableread(self):
+        """
+            Enables reading to the internal register from the four data pins.
+            This is done by taking the enable pin thorugh a full cycle with a
+            50 micosecond period.
+
+            @param: None
+
+            @return: None
+        """
+        delay = 5 * 10 ** -5
+        time.sleep(delay)
         gpio.output(self.__enable, True)
-        # intermediary delay
-        time.sleep(self.__delay)
-        # reset to false
+        time.sleep(delay)
         gpio.output(self.__enable, False)
-        # trailing delay
-        time.sleep(self.__delay)
+        time.sleep(delay)
 
 
-    def __writebyte(self, byte, mode=True):
-        """ Writes a single byte to the register of the LCD.
+    def __writebyte(self, byte):
+        """
+            Writes a single byte to the register of the LCD.
+            This is done by encoding the first 4 most significant bits on our 4
+            data pins, enabling their reading into the internal register, and
+            doing the exact same for the 4 least significant bits.
+
             @param: byte - the character to be written to the LCD's register
-            @param: mode - the register mode for the byte we are about to send.
-                False :: instruction byte
-                True  :: data byte
-                default = True
+
             @return: None
         """
-        gpio.output(self.__regsel, mode)
-
-        # encode leading 4 bits to the data pins
+        # pre-normalize all data pins:
         for pin in self.__datapins:
             gpio.output(pin, False)
+
+        # encode leading 4 bits to the data pins
         if byte & 0x20 == 0x20:
             gpio.output(self.__datapin1, True)
         if byte & 0x40 == 0x40:
@@ -126,11 +162,14 @@ class LCD(object):
             gpio.output(self.__datapin3, True)
         if byte & 0x10 == 0x10:
             gpio.output(self.__datapin4, True)
+
         self.__enableread()
+
 
         # encode trailing 4 bits to the data pins
         for pin in self.__datapins:
             gpio.output(pin, False)
+
         if byte & 0x02 == 0x02:
             gpio.output(self.__datapin1, True)
         if byte & 0x04 == 0x04:
@@ -139,39 +178,34 @@ class LCD(object):
             gpio.output(self.__datapin3, True)
         if byte & 0x01 == 0x01:
             gpio.output(self.__datapin4, True)
+
         self.__enableread()
 
 
-    def write(self, message, line=1, align=1):
-        """ Writes a message to a single line of the LCD.
+    def writeline(self, message, line=1):
+        """
+            Writes a message to a line of the LCD.
+            If line width exceeds 16 characters, the output will not be wrapped.
+
             @param: message - the message to be written.
-            If line width exceeds 16 characters, will not wrap/sway the output.
+
             @param: line - the line at which we wish to write to.
                 1 :: first line
                 2 :: second line
                 default = 1
-            @param: alignment - the alignment of the message on the screen.
-                1 :: left
-                2 :: center
-                3 :: right
-                default = 1
-            @return: none
-        """
-        # set the line we are writing on
-        if line == 1:
-            self.__writebyte(self.__line1, False)
-        else:
-            self.__writebyte(self.__line2, False)
+            failsafe: if incompatible value is provided, will default to line 1.
 
-        # apply the alignment to the string
-        if align == 1:
-            string = message.ljust(self.__screenwidth)
-        elif align == 2:
-            string = message.center(self.__screenwidth)
+            @return: None
+        """
+        self.__regmode("instr")
+        if line != 2:
+            self.__writebyte(self.__line1)
         else:
-            string = message.rjust(self.__screenwidth)
+            self.__writebyte(self.__line2)
 
         # write the message to the LCD, byte by byte
-        for char in string:
+        self.__regmode("data")
+
+        for char in message:
             self.__writebyte(ord(char))
 
