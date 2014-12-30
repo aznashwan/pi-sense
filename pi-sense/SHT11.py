@@ -19,14 +19,19 @@ class SHT11(object):
     C2 =  0.0367
     C3 = -0.0000015955
 
-    # temperature compensation constants for humidity
-    T1 =  0.01
-    T2 =  0.00008
+    # humidity correction constants for temperature
+    T1 = 0.01
+    T2 = 0.00008
 
-    # temperature calculation constants
-    D1 = -40.1
-    D2 = 0.01
-    DC = 30
+    # temperature correction constants
+    # unfortunately, we have an older revision of the sensor that the constants
+    # in the datasheet were no longer compatible with, so we had to do manually
+    # re-compute the constants for our particular revision.
+    # Datasheet values:
+    # D1 = -40.1
+    # D2 =  0.01
+    D1 = -50.0
+    D2 =  0.00785
 
     # command encodings for our sensor:
     __humcmd = 0b00000101
@@ -34,7 +39,7 @@ class SHT11(object):
 
 
     def __init__(self, datapin, clkpin, mode=gpio.BCM):
-        gpio.setmode(mode)        
+        gpio.setmode(mode)
 
         self.datapin = datapin
         self.clockpin = clkpin
@@ -111,14 +116,14 @@ class SHT11(object):
         if gpio.input(self.datapin) != True:
             raise Exception("Error whilst sending command \'%d\'." % (cmd))
 
-        
+
     def __awaitresult(self):
         """
             After a command has been issued, we must wait for the sensor to
-            do the necessary computations.
-            This should last approximately 320 milliseconds, after which 
-            the sensor will pull the data pin to 0 logic and re-enter 
-            idle mode until the read sequence isinitiated.
+            do the necessary computations. This should last approximately
+            320 milliseconds, after which the sensor will pull the data pin
+            to 0 logic and re-enter idle mode until the read sequence is
+            initiated by our PI.
 
             @param: None
 
@@ -130,21 +135,23 @@ class SHT11(object):
         # wait for 400 milliseconds to be sure
         time.sleep(4 * 10 ** -1)
 
-        if gpio.input(self.datapin) != False:
+        if gpio.input(self.datapin) == False:
+            return
+        else:
             raise Exception("Error occured whilst awaiting result.")
 
 
     def __readresult(self):
         """
             Read the result from the sensor.
-            In 14-bit mode, the sensor will return the raw result in two
+            In 16-bit mode, the sensor will return the raw result in two
             one-byte chunks, one bit at a time, most significat first.
             After recieving a byte, we must acknowledge it by pulling data
             to 0 logic ourselves.
 
             @param: None
 
-            @return: integer representing the raw data reading.
+            @return: 2-byte integer representing the raw data reading.
         """
         gpio.setup(self.datapin, gpio.IN)
         gpio.setup(self.clockpin, gpio.OUT)
@@ -209,7 +216,7 @@ class SHT11(object):
             Performs a hard reset on the sensor, clearing all registers and
             re-initiating all communications.
             This is done by keeping data high and going through a minimum
-            of 9 clock cycles.
+            of 8 clock cycles.
 
             @param: None
 
@@ -219,7 +226,7 @@ class SHT11(object):
         gpio.setup(self.clockpin, gpio.OUT)
 
         gpio.output(self.datapin, True)
-        for i in range(9):
+        for i in range(8):
             self.__tick(True)
             self.__tick(False)
 
@@ -230,8 +237,6 @@ class SHT11(object):
             command for reading the temperature and fetches the result.
             The equation of conversion from raw value to actual temperature
             is linear and constant dependant.
-            NOTE: for some reason, our particular sensor seems to be off by
-            approximately 30°, for which we must account at the very end.
 
             @param: None
 
@@ -244,22 +249,25 @@ class SHT11(object):
         self.__denyCRC()
 
         result = raw * self.D2 + self.D1
-        return result - self.DC
+        return result
 
 
-    def humidity(self):
+    def humidity(self, temp=None):
         """
             The main method of the sensor module which issues the necessary
             command for reading the humidity.
             Usually, our sensor calculates humidity relative to the ambient
             temperature, in which case, we require the temperature to apply
             the corrections necessary for obtaining the absolute humidity.
+            If the temperature is not provided, a fresh reading is taken.
 
-            @param: None
+            @param: temp - temperature required for humidity correction.
+                default - None
 
             @return: floating point humidity value (%RH).
         """
-        temp = self.temperature()
+        if temp == None:
+            temp = self.temperature()
 
         self.__sendcmd(self.__humcmd)
 
@@ -270,4 +278,3 @@ class SHT11(object):
         linear = self.C1 + self.C2 * raw + self.C3 * raw ** 2
         result = (temp - 25.0) * (linear * self.T2 + self.T1) + linear
         return result
-
