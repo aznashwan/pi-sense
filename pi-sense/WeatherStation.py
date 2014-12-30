@@ -1,7 +1,13 @@
-import RPi.GPIO as gpio
-import sys
+# Copyright 2014 Nashwan Azhari, Robert Krody, Tudor Vioreanu.
+# Licensed under the GPLv2, see LICENSE for details.
+
+from configparser import ConfigParser
+import os
 import signal
+import sys
 import time
+
+import RPi.GPIO as gpio
 
 from LED import LED
 from LCD import LCD
@@ -10,49 +16,118 @@ from SHT11 import SHT11
 
 class WeatherStation(object):
     """
-        Control class for the entire hardware setup. Lights LEDs, outputs to the LCD
-            and reads from the SHT11 sensor
+        Control class for the entire hardware setup.
+        Contains:
+            - 16x2 LCD
+            - temperature & humidity sensor
+            - green LED to indicate station is operational
+            - blue LED to indicate sensors are currently being queried
+            - red LED to indicate extreme temperature readings
+            - yellow LED to indicate extreme humidity readings
+
+        Example usage:
+        >>> from WeatherStation import WeatherStation
+        >>>
+        >>> # for details about the config file, see "example.conf"
+        >>> ws = WeatherStation("/optional/path/to/config")
+        >>> ws.monitor(time=3600, frequency=5)
     """
 
-    MIN_TEMPERATURE = 15.0
-    MAX_TEMPERATURE = 35.0
-    MIN_HUMIDITY = 30.0
-    MAX_HUMIDITY = 90.0
+    def __init__(self, confpath="./example.conf"):
+        self.mode = None
+        self.warnings = None
+        self.params = {}
+        self.ledpins = {}
+        self.sensorpins = {}
 
-    def __init__(self, configs):
-        # TODO To be changed to read from file or option array
-        # make use of the __main__ part below to feed correct options
-
-        args = sys.argv
-        args.pop(0)  # removes the script name
-        if len(sys.argv) != 4:
-            print "The pins for green, blue, red and yellow LEDs should be set as args"
-            sys.exit(1)
-
+        # read through the config file
         try:
-            args = map(int, args)
-        except ValueError:
-            print "The args should be numeric"
-            sys.exit(1)
+            os.stat(confpath)
+            self.__parseconfig(confpath)
+        except FileNotFoundError:
+            print("Config file %r not found." % confpath)
+            sys.exit(-1)
+        except AssertionError as e:
+            print("The config file is missing the following sections: ", e)
+            sys.exit(-1)
+        except Exception as e:
+            print("Error has occured whist accessing config file:")
+            print(e)
+            sys.exit(-1)
 
-        self.sensor = SHT11()
-        self.lcd = LCD()
+        # set warnings
+        gpio.setwarnings(self.warnings)
 
-        self.status_led = LED(args[0])
-        self.temperature_led = LED(args[1])
-        self.humidity_led = LED(args[2])
-        self.query_led = LED(args[3])
+        # instantiate all components
+        self.lcd = LCD(self.mode)
+        self.sensor = SHT11(self.sensorpins["data"], self.sensorpins["clock"],
+                self.mode)
 
-        self.status_led.on()
+        self.status_led = LED(self.ledpins["green"], self.mode)
+        self.temperature_led = LED(self.ledpins["red"], self.mode)
+        self.humidity_led = LED(self.ledpins["yellow"], self.mode)
+        self.query_led = LED(self.ledpins["blue"], self.mode)
+
+
+    def __parseconfig(self, confpath):
+        """
+            Parses the config file, registering all found values.
+            In case a paricular value is not present, a fallback is provided.
+
+            @param: confpath - path to the configuration file
+
+            @return: none
+        """
+        parser = ConfigParser()
+        parser.read(confpath)
+
+        # check if all required sections are present:
+        sections = parser.sections()
+        expected = ["General", "Parameters", "Sensor", "LEDs"]
+        assert sections >= expected, "%r" % expected - sections
+
+        # get operations mode
+        mode = parser["General"]["MODE"]
+        if mode.lower() == "board":
+            self.mode = gpio.BOARD
+        else:
+            self.mode = gpio.BCM
+
+        # get warnings setting
+        self.warnings = parser.getboolean("General", "WARNINGS", fallback=False)
+
+        # get operational parameters
+        parameters = parser["Parameters"]
+        self.params["maxt"] = parameters.getfloat("MAX_TEMP", fallback=40.0)
+        self.params["mint"] = parameters.getfloat("MIN_TEMP", fallback=20.0)
+        self.params["maxh"] = parameters.getfloat("MAX_HUMID", fallback=30.0)
+        self.params["minh"] = parameters.getfloat("MIN_HUMID", fallback=70.0)
+
+        # get sensor pins
+        sensorpins = parser["Sensor"]
+        self.sensorpins["data"] = sensorpins.getint("DATA", fallback=27)
+        self.sensorpins["clock"] = sensorpins.getint("CLOCK", fallback=4)
+
+        # get led pins
+        ledpins = parser["LEDs"]
+        self.ledpins["green"] = ledpins.getint("GREEN", fallback=12)
+        self.ledpins["red"] = ledpins.getint("RED", fallback=19)
+        self.ledpins["yellow"] = ledpins.getint("YELLOW", fallback=20)
+        self.ledpins["blue"] = ledpins.getint("BLUE", fallback=21)
+
 
     def monitor(self, run_time=600, frequency=1):
         """
-            Lights the appropriate LEDs and displays the result on the LCD for a given ammount
-                of time and at a specified frequency
+            Lights the appropriate LEDs and displays the result on the LCD for
+            a given ammount of time and at a specified frequency.
 
-            @param run_time: Time to run in seconds
-            @param frequency: The frequency at which the update occurs
+            @param run_time: Time to run in seconds.
+            @param frequency: The frequency at which the update occurs.
+
+            @return: None
         """
+        self.status_led.on()
+
         start_time = time.time()
         end_time = start_time + run_time
 
@@ -60,20 +135,24 @@ class WeatherStation(object):
             try:
                 self.query_led.on()
                 temperature = self.sensor.temperature()
-                humidity = self.sensor.humidity()
+                humidity = self.sensor.humidity(temperature)
                 self.query_led.off()
 
                 self.__trigger_leds(humidity, temperature)
 
-                message_temp = self.__lcd_message(temperature, "Temperature")
-                message_humidity = self.__lcd_message(humidity, "   Humidity")
+                message_temp = self.__lcd_message(temperature, "(C)")
+                message_humidity = self.__lcd_message(humidity, "(RH%)")
 
-                self.lcd.write(message_temp, 1)
-                self.lcd.write(message_humidity, 2)
+                self.lcd.writeline(message_temp, line=1)
+                self.lcd.writeline(message_humidity, line=2)
             except Exception:
                 self.sensor.reset()
+                time.sleep(1)
 
             time.sleep(frequency)
+
+        self.status_led.off()
+
 
     def __lcd_message(self, reading, measurement=""):
         """
@@ -89,7 +168,8 @@ class WeatherStation(object):
             @rtype: String
         """
 
-        return "%s %d" % (measurement, reading)
+        return ("%.2f %s" % (reading, measurement)).center(self.lcd.SCREENWIDTH, " ")
+
 
     def __trigger_leds(self, humidity, temperature):
         """
@@ -103,35 +183,13 @@ class WeatherStation(object):
             @return: None
         """
 
-        if self.MIN_HUMIDITY > humidity or self.MAX_HUMIDITY < humidity:
+        if self.params["minh"] > humidity or self.params["maxh"] < humidity:
             self.humidity_led.on()
         else:
             self.humidity_led.off()
 
-        if self.MIN_TEMPERATURE > temperature or self.MAX_TEMPERATURE < temperature:
+        if self.params["mint"] > temperature or self.params["maxt"] < temperature:
             self.temperature_led.on()
         else:
             self.temperature_led.off()
-
-
-def signal_handler(signal, frame):
-    """
-        System handler for system wide interrupts. Mainly for cleaning purposes
-
-        @param signal: Unused
-        @param frame: Unused
-    """
-    gpio.cleanup()
-    sys.exit(0)
-
-
-if __name__ == "__main__":
-    signal.signal(signal.SIGINT, signal_handler)
-
-    weather_station = WeatherStation()
-    weather_station.monitor()
-    gpio.cleanup()
-
-
-
 

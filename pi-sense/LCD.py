@@ -4,6 +4,7 @@
 import time
 import RPi.GPIO as gpio
 
+
 class LCD(object):
     """
         An object-wrapper that models our LCD (Adafruit PI-Shield 16x2 LCD).
@@ -32,7 +33,7 @@ class LCD(object):
     __line2 = 0xC0
 
     # screen model parameters
-    __screenwidth = 16
+    SCREENWIDTH = 16
 
 
     def __init__(self, mode=gpio.BCM):
