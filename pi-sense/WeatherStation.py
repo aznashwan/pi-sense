@@ -2,15 +2,12 @@
 # Licensed under the GPLv2, see LICENSE for details.
 
 from configparser import ConfigParser
-import os
-import signal
-import sys
-import time
+import os, sys, time
 
 import RPi.GPIO as gpio
 
-from LED import LED
 from LCD import LCD
+from LED import LED
 from SHT11 import SHT11
 
 
@@ -37,6 +34,7 @@ class WeatherStation(object):
         self.mode = None
         self.warnings = None
         self.params = {}
+        self.leds = []
         self.ledpins = {}
         self.sensorpins = {}
 
@@ -51,7 +49,7 @@ class WeatherStation(object):
             print("The config file is missing the following sections: ", e)
             sys.exit(-1)
         except Exception as e:
-            print("Error has occured whist accessing config file:")
+            print("Error has occured whilst accessing config file:")
             print(e)
             sys.exit(-1)
 
@@ -67,6 +65,15 @@ class WeatherStation(object):
         self.temperature_led = LED(self.ledpins["red"], self.mode)
         self.humidity_led = LED(self.ledpins["yellow"], self.mode)
         self.query_led = LED(self.ledpins["blue"], self.mode)
+        self.leds = [self.status_led, self.temperature_led, self.humidity_led,
+                self.query_led]
+
+        # blink all LEDs
+        for led in self.leds:
+            led.blink(0.3)
+
+        # write status to the screen
+        self.__lcd_write("WEATHERSTATION", "OPERATIONAL")
 
 
     def __parseconfig(self, confpath):
@@ -132,53 +139,51 @@ class WeatherStation(object):
         end_time = start_time + run_time
 
         while time.time() <= end_time:
+            # query the sensor
+            self.query_led.on()
             try:
-                self.query_led.on()
                 temperature = self.sensor.temperature()
                 humidity = self.sensor.humidity(temperature)
-                self.query_led.off()
-
-                self.__trigger_leds(humidity, temperature)
-
-                message_temp = self.__lcd_message(temperature, "(C)")
-                message_humidity = self.__lcd_message(humidity, "(RH%)")
-
-                self.lcd.writeline(message_temp, line=1)
-                self.lcd.writeline(message_humidity, line=2)
             except Exception:
                 self.sensor.reset()
                 time.sleep(1)
+                continue
+            self.query_led.off()
+
+            # trigger appropriate LEDs
+            self.__trigger_leds(humidity, temperature)
+
+            # write values on the LCD
+            self.__lcd_write("%.2f %s" % (temperature, "(C)"),
+                    "%.2f %s" % (humidity, "(RH%)"))
 
             time.sleep(frequency)
 
-        self.status_led.off()
+        self.clear()
+        self.__lcd_write("WEATHERSTATION", "OPERATIONAL")
 
 
-    def __lcd_message(self, reading, measurement=""):
+    def __lcd_write(self, line1="", line2=""):
         """
-            Helper function to generate the LCD message for a reading
+            Centers and writes the two lines to the LCD.
 
-            @param reading: The numeric value that should appear in the string
-            @type reading: Numeric
+            @param: line1 - what to write on the first line of the LCD.
 
-            @param measurement: The string representation of the measured element
-            @type measurement: String
+            @param: line2 - what to write on the second line of the LCD.
 
-            @return: The message to be displayed on the LCD
-            @rtype: String
+            @return: None
         """
-
-        return ("%.2f %s" % (reading, measurement)).center(self.lcd.SCREENWIDTH, " ")
+        self.lcd.writeline(line1.center(self.lcd.SCREENWIDTH, " "), line=1)
+        self.lcd.writeline(line2.center(self.lcd.SCREENWIDTH, " "), line=2)
 
 
     def __trigger_leds(self, humidity, temperature):
         """
-            Lights up the LEDs based on the current status
+            Lights up the LEDs based on the current status.
 
-            @param humidity: Current humidity reading
-            @type humidity: Numeric
-            @param temperature: Current temperature reading
-            @type humidity: Numeric
+            @param: humidity - current humidity reading.
+
+            @param: temperature - current temperature reading.
 
             @return: None
         """
@@ -193,3 +198,34 @@ class WeatherStation(object):
         else:
             self.temperature_led.off()
 
+
+    def clear(self):
+        """
+            Turns off all LED's, clear the LCD, set sensor to idle.
+
+            @param: None
+
+            @return: None
+        """
+        for led in self.leds:
+            led.off()
+
+        self.sensor.reset()
+
+        self.lcd.clear()
+
+
+    def cleanup(self):
+        """
+            Turn off associated LED's, clear the LCD, cleanup all pins.
+            This method is meant to be called after the instance of
+            WeatherStation has done its job and is no longer required.
+            After this method is called, this instance of WeatherStation is
+            rendered useless.
+
+            @param: None
+
+            @return: None
+        """
+        self.clear()
+        gpio.cleanup()

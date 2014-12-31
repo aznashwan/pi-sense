@@ -1,3 +1,6 @@
+# Copyright 2014 Nashwan Azhari, Robert Krody, Tudor Vioreanu.
+# Licensed under the GPLv2, see LICENSE for details.
+
 import time
 import RPi.GPIO as gpio
 

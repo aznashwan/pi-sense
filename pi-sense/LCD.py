@@ -183,6 +183,18 @@ class LCD(object):
         self.__enableread()
 
 
+    def clear(self):
+        """
+            Clears the LCD
+
+            @param: None
+
+            @return: None
+        """
+        self.writeline(" " * self.SCREENWIDTH, line=1)
+        self.writeline(" " * self.SCREENWIDTH, line=2)
+
+
     def writeline(self, message, line=1):
         """
             Writes a message to a line of the LCD.
@@ -209,4 +221,3 @@ class LCD(object):
 
         for char in message:
             self.__writebyte(ord(char))
-
