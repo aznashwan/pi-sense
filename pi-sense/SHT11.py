@@ -12,6 +12,21 @@ class SHT11(object):
         The below code conforms to the normal operation of the sensor as is
         outlined in its usage manual:
             http://www.sensirion.com/fileadmin/user_upload/customers/sensirion/Dokumente/Humidity/Sensirion_Humidity_SHT1x_Datasheet_V5.pdf
+
+        Example usage:
+        >>> import time
+        >>> from SHT11 import SHT11
+        >>>
+        >>> sht11 = SHT11(27, 4)
+        >>>
+        >>> temp = sht11.temperature()
+        >>> print("Temperature (°C): %.4f" % temp)
+        >>>
+        >>> # **always** wait at least one second between readings!
+        >>> time.wait(1)
+        >>>
+        >>> humid = sht11.humidity()
+        >>> print("Humidity (%RH): %.4f" % humid)
     """
 
     # humidity calculation constants
@@ -39,6 +54,18 @@ class SHT11(object):
 
 
     def __init__(self, datapin, clkpin, mode=gpio.BCM):
+        """
+            Instanciates an object of class SHT11.
+
+            @param: datapin - pin used for data transmission to/from sensor.
+
+            @param: clkpin - pin used for the serial clock signal to sensor.
+
+            @param: mode - numbering scheme to be used for the sensor pins.
+                gpio.BOARD :: board pin layout numbering scheme.
+                gpio.BCM   :: processor pin numbering scheme.
+                default = gpio.BCM
+        """
         gpio.setmode(mode)
 
         self.datapin = datapin
@@ -216,7 +243,7 @@ class SHT11(object):
             Performs a hard reset on the sensor, clearing all registers and
             re-initiating all communications.
             This is done by keeping data high and going through a minimum
-            of 8 clock cycles.
+            of 9 clock cycles.
 
             @param: None
 
@@ -226,7 +253,7 @@ class SHT11(object):
         gpio.setup(self.clockpin, gpio.OUT)
 
         gpio.output(self.datapin, True)
-        for i in range(8):
+        for i in range(9):
             self.__tick(True)
             self.__tick(False)
 
@@ -234,9 +261,10 @@ class SHT11(object):
     def temperature(self):
         """
             The main method of the sensor module which issues the necessary
-            command for reading the temperature and fetches the result.
+            command for reading the temperature and returns the result.
             The equation of conversion from raw value to actual temperature
-            is linear and constant dependant.
+            is linear and constant dependant. All corrections are done before
+            the sending of the final result.
 
             @param: None
 
@@ -255,7 +283,8 @@ class SHT11(object):
     def humidity(self, temp=None):
         """
             The main method of the sensor module which issues the necessary
-            command for reading the humidity.
+            command for reading the humidity and returns the value after
+            applying all necessary corrections on it.
             Usually, our sensor calculates humidity relative to the ambient
             temperature, in which case, we require the temperature to apply
             the corrections necessary for obtaining the absolute humidity.
@@ -275,6 +304,6 @@ class SHT11(object):
         raw = self.__readresult()
         self.__denyCRC()
 
-        linear = self.C1 + self.C2 * raw + self.C3 * raw ** 2
-        result = (temp - 25.0) * (linear * self.T2 + self.T1) + linear
+        actual = self.C1 + self.C2 * raw + self.C3 * raw ** 2
+        result = (temp - 25.0) * (actual * self.T2 + self.T1) + actual
         return result

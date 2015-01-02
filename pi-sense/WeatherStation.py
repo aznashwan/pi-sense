@@ -26,11 +26,18 @@ class WeatherStation(object):
         >>> from WeatherStation import WeatherStation
         >>>
         >>> # for details about the config file, see "example.conf"
-        >>> ws = WeatherStation("/optional/path/to/config")
-        >>> ws.monitor(time=3600, frequency=5)
+        >>> ws = WeatherStation("/absolute/path/to/config/file.conf")
+        >>> ws.monitor(run_time=3600, frequency=5)
     """
 
     def __init__(self, confpath="./example.conf"):
+        """
+            Instantiates a WeatherStation object and all of its individual
+            components.
+
+            @param: confpath - absolute path to configuration file.
+                default = "./example.conf"
+        """
         self.mode = None
         self.warnings = None
         self.params = {}
@@ -107,8 +114,8 @@ class WeatherStation(object):
         parameters = parser["Parameters"]
         self.params["maxt"] = parameters.getfloat("MAX_TEMP", fallback=40.0)
         self.params["mint"] = parameters.getfloat("MIN_TEMP", fallback=20.0)
-        self.params["maxh"] = parameters.getfloat("MAX_HUMID", fallback=30.0)
-        self.params["minh"] = parameters.getfloat("MIN_HUMID", fallback=70.0)
+        self.params["maxh"] = parameters.getfloat("MAX_HUMID", fallback=70.0)
+        self.params["minh"] = parameters.getfloat("MIN_HUMID", fallback=30.0)
 
         # get sensor pins
         sensorpins = parser["Sensor"]
@@ -129,6 +136,7 @@ class WeatherStation(object):
             a given ammount of time and at a specified frequency.
 
             @param run_time: Time to run in seconds.
+
             @param frequency: The frequency at which the update occurs.
 
             @return: None

@@ -16,6 +16,15 @@ class LCD(object):
         explanation in the datasheet of our particular model of LCD that may be
         found here:
             https://learn.adafruit.com/downloads/pdf/drive-a-16x2-lcd-directly-with-a-raspberry-pi.pdf
+
+        Example usage:
+        >>> from LCD import LCD
+        >>>
+        >>> lcd = LCD()
+        >>>
+        >>> lcd.writeline("First line.", line=1)
+        >>> lcd.writeline("Second line.", line=2)
+        >>> lcd.clear()
     """
 
     # define all of out used pins
@@ -45,8 +54,7 @@ class LCD(object):
         # setup all the pins for output
         gpio.setup(self.__regsel, gpio.OUT)
         gpio.setup(self.__enable, gpio.OUT)
-        for pin in self.__datapins:
-            gpio.setup(pin, gpio.OUT)
+        gpio.setup(self.__datapins, gpio.OUT)
 
         self.__initialize()
 
@@ -151,8 +159,7 @@ class LCD(object):
             @return: None
         """
         # pre-normalize all data pins:
-        for pin in self.__datapins:
-            gpio.output(pin, False)
+        gpio.output(self.__datapins, False)
 
         # encode leading 4 bits to the data pins
         if byte & 0x20 == 0x20:
@@ -168,8 +175,7 @@ class LCD(object):
 
 
         # encode trailing 4 bits to the data pins
-        for pin in self.__datapins:
-            gpio.output(pin, False)
+        gpio.output(self.__datapins, False)
 
         if byte & 0x02 == 0x02:
             gpio.output(self.__datapin1, True)
@@ -185,7 +191,7 @@ class LCD(object):
 
     def clear(self):
         """
-            Clears the LCD
+            Clears the LCD.
 
             @param: None
 

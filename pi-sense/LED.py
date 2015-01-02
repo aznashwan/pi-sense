@@ -6,39 +6,57 @@ import RPi.GPIO as gpio
 
 
 class LED(object):
+    """
+        Class which models a single LED.
+
+        Example usage:
+        >>> from LED import LED
+        >>>
+        >>> led = LED(20)
+        >>>
+        >>> led.on()
+        >>> led.off()
+        >>> led.blink(delay=2)
+    """
     def __init__(self, pin, mode=gpio.BCM):
         """
             Creates a LED instance for use on a RasberyPI B+
 
             @param pin: Pin identification code for the selected mode
             @type pin: int
+
             @param mode: Can be gpio.BCM or gpio.BOARD
         """
         self.pin = pin
-        
+
         if mode == gpio.BCM or mode == gpio.BOARD:
             self.mode = mode
-        
+
         gpio.setup(pin, gpio.OUT)
         gpio.setwarnings(False)
+
 
     def on(self):
         """
             Turns the led ON if it isn't already
 
             @param self:
+
             @return: None
         """
         gpio.output(self.pin, True)
-    
+
+
     def off(self):
         """
             Turns the led OFF if it isn't already
 
             @param self:
+
             @return : None
         """
         gpio.output(self.pin, False)
+
 
     def blink(self, delay=1):
         """
